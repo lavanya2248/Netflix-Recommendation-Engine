@@ -1,0 +1,234 @@
+# CAPSTONE PROJECT REPORT: Personalised Streaming Recommendation Engine
+
+**Author:** M. Lavanya
+
+**Role:** Data Science & Analytics Intern
+
+---
+
+## 1. Executive Summary & Business Understanding
+
+### 1.1 Problem Statement
+
+In modern Over-The-Top (OTT) media and streaming markets, predicting and driving customer interaction lies at the core of platform scalability and revenue monetization. While simple aggregate vanity metrics (e.g., total platform watch-time) provide high-level tracking, they frequently mask critical segment-level inefficiencies. Relying on basic popularity averages leads to content fatigue, over-indexing on broad mainstream genres, and an inability to convert users in high-yield niche markets.
+
+### 1.2 Core Objectives
+
+This capstone project establishes a data-driven framework to build a robust recommendation engine from the ground up, utilizing over 1 million rows of transactional user interaction data. The core strategic goals are:
+
+1. Identify the most popular and highly rated genres to map user base distribution.
+
+
+2. Isolate which genre segments receive the best and worst average feedback yields to find optimization opportunities.
+
+
+3. Build a personal machine learning model via latent matrix factorization to recommend tailored, unseen movies for users across any genre.
+
+
+
+---
+
+## 2. Dataset Architecture & Quality Overview
+
+The engine utilizes two core data files sourced from the Intellipaat course directory, establishing a solid baseline for structural evaluation:
+
+* **`movies.csv`**: Contains 27,278 rows mapping unique movie identifiers (`movieId`) to clean qualitative metadata (`title`, `genres`).
+
+
+* **`ratings.csv`**: Contains 1,048,575 rows of explicit transactional records mapping specific platform users (`userId`) to items, ratings on a 0.5–5.0 star scale, and temporal metadata (`timestamp`).
+
+
+
+### 2.1 Matrix Sparsity Evaluation
+
+The structural relationship between users and content is defined by a sparse interaction matrix $R$ of size $M \times N$, where $M$ represents unique users (7,120) and $N$ represents unique rated movies (14,026).
+
+
+$$\text{Sparsity} = 1 - \left( \frac{\text{Actual Interactions}}{M \times N} \right) = 1 - \left( \frac{1,048,575}{7,120 \times 14,026} \right) = 98.95\%$$
+
+
+A sparsity level of **98.95%** means that nearly 99% of the user-item combinations are unobserved. This represents a classic real-world recommender constraint, demonstrating why standard clustering or primitive distance-metric strategies fail and matrix factorization is mathematically necessary.
+
+---
+
+## 3. Data Engineering & Preprocessing Pipeline
+
+To clean unstructured string fields and parse them into data types suitable for a machine learning pipeline, we executed three primary steps:
+
+1. **Temporal Extraction**: Applied a Regular Expression pattern `\((\d{4})\)` to pull the 4-digit release year from the `title` text column, casting it into a distinct integer data type (`Int64`).
+
+
+2. **Title String Standardisation**: Cleaned trailing year blocks from the `title` string and corrected database article markers using an inverted regex rule (e.g., changing `"Matrix, The"` to `"The Matrix"`), ensuring clean final user interface rendering.
+3. **Genre Space Formatting**: Parsed pipe-separated categorical strings (`Action|Sci-Fi`) into clean, space-delimited text blocks (`"Action Sci-Fi"`) to make them compatible with downstream text tokenizers.
+
+
+4. **Temporal Parsing**: Converted Unix timestamps to readable standard `datetime` formats to enable potential future analysis of seasonal user engagement.
+
+
+
+---
+
+## 4. Exploratory Data Analysis (EDA) & Segment Insights
+
+### 4.1 Rating Distribution & User Long-Tail Analysis
+
+Our visual analysis shows that platform responses lean positively, with a heavy concentration of scores around 3.0, 4.0, and 5.0 stars. Half-star scores are used less frequently than whole integers.
+
+The user interaction volume follows a classic long-tail distribution. A vast majority of users rate fewer than 50 titles, while a small group of high-engagement power users contributes a massive share of total platform activity. This disparity requires models that can extract signal from highly constrained user histories.
+
+### 4.2 High-Engagement vs. High-Yield Genre Inefficiencies
+
+When matching content popularity against explicit content quality, we find clear segment anomalies:
+
+```
++-----------------------------+---------------------------+
+| Top 5 Most Rated Movies     | Top 5 Highest Rated*      |
++-----------------------------+---------------------------+
+| 1. Pulp Fiction (3,498)     | 1. The Shawshank Redemp.  |
+| 2. Forrest Gump (3,476)     | 2. The Godfather          |
+| 3. Silence of the Lambs     | 3. The Usual Suspects     |
+| 4. Shawshank Redemption     | 4. Band of Brothers       |
+| 5. Jurassic Park (3,129)    | 5. Creature Comforts      |
++-----------------------------+---------------------------+
+*Filtered by a statistical threshold of minimum 100 ratings to avoid sample bias.
+
+```
+
+Our segment analysis uncovers a significant volume-versus-yield opportunity:
+
+```
+      Total Ratings Volume                       Average Rating Yield
+1. Drama     ====================         1. Film-Noir  ========= (approx 4.0)
+2. Comedy    ==============               2. Documentary ========
+3. Action    ===========                  3. War         =======
+
+```
+
+* **The Inefficiency**: While **Drama** and **Comedy** drive the largest overall rating volumes due to high content availability, niche segments like **Film-Noir**, **Documentary**, and **War** generate significantly higher average ratings.
+
+
+* **Strategic Application**: Relying purely on aggregate popularity loops would flood users with average mainstream content. The personal engine must actively recommend hidden, high-yield niche choices to improve user satisfaction and retention.
+
+---
+
+## 5. Machine Learning System Architecture
+
+We built and evaluated three distinct recommendation architectures to address different phases of the customer lifecycle:
+
+```
+                  ┌────────────────────────────────────────┐
+                  │      Recommendation System Core        │
+                  └───────────────────┬────────────────────┘
+                                      │
+         ┌────────────────────────────┼───────────────────────────┐
+         ▼                            ▼                           ▼
+┌─────────────────┐         ┌───────────────────┐       ┌───────────────────┐
+│ Popularity-Based│         │   Content-Based   │       │Matrix Factoriz.   │
+│ (Cold Start)    │         │ (Genre Similarity)│       │ (SVD Personalised)│
+└─────────────────┘         └───────────────────┘       └───────────────────┘
+
+```
+
+### 5.1 Popularity-Based Model (Cold Start Handler)
+
+For new platform users with zero historical context, the system uses a non-personalized baseline. To prevent recommending universally disliked popular films or high-scoring obscure titles, the algorithm applies a minimum filter threshold of 100 ratings and sorts by calculated `avg_rating` within that stable subset.
+
+### 5.2 Content-Based Model (Genre Cosine Space)
+
+This model maps the direct properties of items previously watched by a user. The text-engineered genre strings are vectorized into a term-frequency coordinate space using a TF-IDF Tokenizer. Pairwise relationship scores between items are computed using Cosine Similarity, measuring the cosine of the angle between the two directional vectors:
+
+
+$$\text{Cosine Similarity}(x, y) = \frac{x \cdot y}{\|x\| \|y\|}$$
+
+### 5.3 Personalised Collaborative Filtering via SVD
+
+To handle high sparsity (98.95%), the core personalized engine uses an advanced **Singular Value Decomposition (SVD)** framework via `scikit-surprise`.
+
+SVD factorizes the large user-movie rating matrix into lower-dimensional latent representations, mapping users and items into 100 abstract feature dimensions. This approach uncovers underlying characteristics (e.g., directorial sub-genres, tone, pacing) that text keywords cannot capture. The rating prediction formula is expressed as:
+
+
+$$\hat{R}_{u,i} = \mu + b_u + b_i + q_i^T p_u$$
+
+
+Where:
+
+* $\mu$ is the global platform baseline rating.
+
+
+* $b_u$ and $b_i$ represent explicit user and item bias deviations from that mean.
+
+
+* $p_u$ and $q_i$ map the specific user and item location vectors across the 100 latent dimensions.
+
+
+
+---
+
+## 6. Model Training, Evaluation, & Performance
+
+The SVD model was trained on an 80/20 train-test partition. Predictions generated on the held-out validation test set were evaluated using Root Mean Square Error (RMSE) and Mean Absolute Error (MAE):
+
+$$\text{RMSE} = \sqrt{\frac{1}{N}\sum(R_{u,i} - \hat{R}_{u,i})^2} \qquad \text{MAE} = \frac{1}{N}\sum|R_{u,i} - \hat{R}_{u,i}|$$
+
+### 6.1 Performance Metrics
+
+The system achieved the following validation scores:
+
+* **RMSE**: $0.8334$
+
+* **MAE**: $0.6375$
+
+
+### 6.2 Data Science Interpretation
+
+An MAE of **0.64** indicates that, on average, the engine's predicted scores deviate by less than two-thirds of a single star from a user's actual rating. The close alignment between the RMSE (0.83) and MAE shows the model has high error stability and is robust against extreme prediction outliers, making it highly reliable for live deployment.
+
+---
+
+## 7. Recommendation Generation Loop
+
+The implementation features a modular, reusable production function: `recommend_top_n_for_user_surprise(user_id, top_n)`. This engine dynamically queries user histories, constructs candidate lists of unseen items, and scores them using our latent factor vectors.
+
+### 7.1 Production Performance Demonstration
+
+Below is an explicit sample output generated for platform **User 1**:
+
+```
+--- Personalized Recommendations for User 1 ---
++---+----------------------------+---------------------+----------------──+
+|   | Movie Title                | Genre Metadata      | Predicted Rating |
++---+----------------------------+---------------------+----------------──+
+| 0 | Celebration, The (Festen)  | Drama               | 4.49             |
+| 1 | Lady Eve, The              | Comedy|Romance      | 4.48             |
+| 2 | Black Mirror               | Drama|Sci-Fi        | 4.46             |
+| 3 | Stop Making Sense          | Documentary|Musical | 4.45             |
+| 4 | Head-On (Gegen die Wand)   | Drama|Romance       | 4.44             |
++---+----------------------------+---------------------+----------------──+
+
+```
+
+### 7.2 Business Impact Analysis
+
+The engine accurately targets personal tastes while balancing mainstream appeal and niche variety. It successfully surfaced highly rated choices from niche genres—such as the documentary section (*Stop Making Sense*, 4.45) and localized drama categories (*Festen*, 4.49)—without over-indexing on generic platform blockbusters. This approach surfaces high-satisfaction long-tail content, optimizing user retention and conversion metrics.
+
+---
+
+## 8. Strategic Conclusions & Future Scope
+
+### 8.1 Core Takeaways
+
+1. **Resolved Matrix Sparsity**: The SVD matrix factorization framework successfully handled a 98.95% sparse user-item space, maintaining high predictive performance with an RMSE of 0.83.
+
+
+2. **Mitigated Cold Start constraints**: Combining a popularity-based baseline with personal matrix filters provides an effective onboarding system for new users.
+
+
+3. **Optimized Segment Discovery**: The engine uncovers user preferences for high-yield niche genres (e.g., Documentaries, Sci-Fi), preventing them from being buried by broad, high-volume mainstream content.
+
+
+
+### 8.2 Future Roadmap
+
+* **Ensemble Hybridization**: Combine SVD collaborative scores with content-based TF-IDF cosine distances into a single hybrid prediction model to increase recommendation variety.
+* **Temporal Decay Integration**: Factor user rating dates into the learning weights to account for evolving consumer tastes and structural lifestyle changes over time.
+* **Deep Learning Models**: Transition the core model to a Neural Collaborative Filtering (NCF) architecture to capture non-linear user-item relationships.
